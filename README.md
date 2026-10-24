@@ -6,6 +6,10 @@ program built on
 database file opens in its own tab. rhun keeps Save, Undo, and the dirty dot; this extension
 keeps the bytes.
 
+<p align="center">
+    <img src="assets/screenshot.png" />
+</p>
+
 Open a `.sqlite`, `.sqlite3`, `.db`, `.sdb`, or `.db3` file. The tab is laid out like a
 spreadsheet editor: `SELECT * FROM` the current table, a grid whose headers show each column's
 type and key, and the `INSERT` or `UPDATE` statement along the bottom. The sidebar lists the
