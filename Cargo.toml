@@ -1,0 +1,17 @@
+[package]
+name = "rhun-sqlite-viewer"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "Browse and edit SQLite databases in the rhun editor."
+
+[dependencies]
+rhun-ext = { git = "https://github.com/rhun-editor/extension-protocol", tag = "rust-v1.4.2" }
+rusqlite = { version = "0.32", features = ["bundled", "backup"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+panic = "abort"

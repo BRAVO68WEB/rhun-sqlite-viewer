@@ -1,0 +1,82 @@
+# A tag vX.Y.Z (equal to version in extension.ini) builds the extension on Linux, macOS and
+# Windows and publishes what rhun's Install from GitHub takes: NAME-TARGET.tar.gz, the extension
+# folder's contents at its top level, and sha256sums.txt covering them.
+# There is no WebAssembly build: bundled SQLite does not compile for wasm32-wasip1.
+name: release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { target: linux-x86_64, os: ubuntu-latest, rust: x86_64-unknown-linux-musl }
+          - { target: macos-arm64, os: macos-latest, rust: aarch64-apple-darwin }
+          - { target: windows-x64, os: windows-latest, rust: x86_64-pc-windows-msvc }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: musl
+        if: matrix.target == 'linux-x86_64'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: rustup target add ${{ matrix.rust }}
+      - name: Build
+        shell: bash
+        env:
+          RUSTFLAGS: ${{ matrix.target == 'windows-x64' && '-C target-feature=+crt-static' || '' }}
+        run: |
+          set -e
+          cargo test --locked
+          cargo build --release --locked --target ${{ matrix.rust }}
+          name=$(sed -n 's/^name *= *//p' extension.ini | head -1)
+          exe=""; if [ "${{ matrix.target }}" = windows-x64 ]; then exe=.exe; fi
+          mkdir -p out
+          cp "target/${{ matrix.rust }}/release/$name$exe" "out/$name-${{ matrix.target }}$exe"
+          # Rust's linker signature is rejected on macOS (the process dies with SIGKILL, exit 137)
+          if [ "${{ matrix.target }}" = macos-arm64 ]; then codesign --force --sign - "out/$name-${{ matrix.target }}"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: out
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag is the manifest's version
+        run: test "${GITHUB_REF_NAME#v}" = "$(sed -n 's/^version *= *//p' extension.ini | head -1)"
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/bins
+      - name: Pack
+        run: |
+          set -e
+          name=$(sed -n 's/^name *= *//p' extension.ini | head -1)
+          bins=$RUNNER_TEMP/bins
+          mkdir -p dist
+          for t in linux-x86_64 macos-arm64 windows-x64; do
+            stage=$(mktemp -d)
+            sh tests/layout.sh "$stage"
+            mkdir -p "$stage/bin"
+            if grep -q "^run\.$t *=" extension.ini; then
+              cp "$bins/bin-$t/"* "$stage/bin/"
+              chmod +x "$stage/bin/"*
+            fi
+            tar -czf "dist/$name-$t.tar.gz" -C "$stage" .
+          done
+          (cd dist && sha256sum *.tar.gz > sha256sums.txt)
+          cat dist/sha256sums.txt
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --title "$GITHUB_REF_NAME" \
+            --notes "Install it in rhun: the extensions button in the title bar, then Install from GitHub, then ${GITHUB_REPOSITORY}."
